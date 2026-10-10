@@ -157,6 +157,19 @@ def save_q_table(q_table, path):
     np.save(path, q_table)
     return path
 
+def load_q_table(path, action_size=4):
+    """从 .npy 载入已训练好的Q表，构造一个可直接测试的 agent（跳过训练）"""
+    path=Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"找不到Q表文件: {path}")
+    q_table=np.load(path)
+    if q_table.shape != (SIZE, SIZE, action_size):
+        raise ValueError(f"Q表形状 {q_table.shape} 与期望 {(SIZE, SIZE, action_size)} 不符")
+    agent=QLearning(action_size, SIZE)
+    agent.q_table=q_table
+    agent.exploration_rate=0.0   # 载入即用，不再探索
+    return agent
+
 def qlearning_train(qlabs,drawer):
     """使用Q-learning算法训练无人机"""
     print("开始Q-learning训练...")
@@ -293,8 +306,14 @@ if __name__=="__main__":
     parser=argparse.ArgumentParser(description='QDrone2 走迷宫 - Q-Learning Demo')
     parser.add_argument('--virtual', action='store_true',
                         help='用纯网格虚拟环境训练（秒级完成），不连接 QLabs')
+    parser.add_argument('--load', type=str, default=None, metavar='QTABLE.npy',
+                        help='载入已训练好的Q表并跳过训练（配合真机可只跑测试出图）')
     args=parser.parse_args()
     VIRTUAL=args.virtual
+
+    if args.load and VIRTUAL:
+        print("注意：--load 与 --virtual 同时使用，测试也会在虚拟环境里跑，")
+        print("      误差分布图会全是 0，不能用于正式结果。")
 
     if VIRTUAL:
         # 虚拟模式：只填充 MAZE，不连接 QLabs、不搭建城市
@@ -312,9 +331,13 @@ if __name__=="__main__":
     
     evaluator = Evaluator()
     
-    # 开始训练
+    # 开始训练（带 --load 时跳过训练，直接载入已训练好的Q表）
     drawer=Draw(SIZE, MAZE)
-    agent=qlearning_train(qlabs, drawer)
+    if args.load:
+        agent=load_q_table(args.load)
+        print(f"已载入Q表 {args.load}，跳过训练")
+    else:
+        agent=qlearning_train(qlabs, drawer)
     x,y,finished=qlearning_test(qlabs, agent, evaluator)
     drawer.draw(x, y, "Trajectory", "x", "y")
     
