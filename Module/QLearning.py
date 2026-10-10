@@ -1,7 +1,7 @@
 import numpy as np
 
 class QLearning:
-    def __init__(self, action_size, SIZE, learning_rate=0.1, discount_factor=0.9, exploration_rate=1.0, exploration_decay=0.997, min_exploration=0.01):
+    def __init__(self, action_size, SIZE, learning_rate=0.1, discount_factor=0.9, exploration_rate=1.0, exploration_decay=0.99, min_exploration=0.01):
         """
         输入变量：
             action_size: 动作空间大小

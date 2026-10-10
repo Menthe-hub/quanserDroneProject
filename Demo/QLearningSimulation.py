@@ -20,7 +20,7 @@ from Module.Drawing import Draw
 from Module.Evaluator import Evaluator
 
 SIZE=19
-EPISODES=2000
+EPISODES=1000
 MAX_STEPS=100
 GOAL_TOLERANCE=0.3
 ORIGINE=[0.5, 0.5]

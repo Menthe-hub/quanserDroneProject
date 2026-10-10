@@ -14,11 +14,8 @@ class Reward:
         self.GOAL=GOAL
     
     def mhd_dist(self, point1, point2):
-        """计算曼哈顿距离"""
-        dist=point1[0]-point2[0]+point1[1]-point2[1]
-        if dist<0:
-            dist=-dist
-        return dist
+        """计算曼哈顿距离 |dx| + |dy|"""
+        return abs(point1[0]-point2[0]) + abs(point1[1]-point2[1])
     
     def __success(self, done, finish, not_collision, step):
         """计算到达奖励
@@ -113,6 +110,5 @@ class Reward:
         elif episode<=self.EPISODES/3:
             reward=self.__explore(current_location)
         else:
-            reward=self.__arrive(current_location)
-            reward=self.__flight_back(prev_action, current_action)
+            reward=self.__arrive(current_location)+self.__flight_back(prev_action, current_action)
         return reward
