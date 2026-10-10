@@ -20,7 +20,7 @@ from Module.Drawing import Draw
 from Module.Evaluator import Evaluator
 
 SIZE=19
-EPISODES=1000
+EPISODES=800
 MAX_STEPS=100
 GOAL_TOLERANCE=0.3
 ORIGINE=[0.5, 0.5]
@@ -28,7 +28,7 @@ GOAL=[SIZE-0.5, SIZE-0.5]
 VIRTUAL=False   # 由 __main__ 的 --virtual 覆盖；True 时用纯网格虚拟环境替代 QLabs
 
 SAVE_DIR=Path(__file__).parent.parent/"saved_models"   # Q表保存目录
-CHECKPOINT_EVERY=500                                    # 每多少回合存一次检查点
+CHECKPOINT_EVERY=200                                    # 每多少回合存一次检查点
 
 MAZE=np.ones((SIZE+2,SIZE+2))
 for i in range(SIZE+2):

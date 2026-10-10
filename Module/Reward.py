@@ -107,8 +107,9 @@ class Reward:
         """
         if done:
             reward=self.__success(done, finish, not_collision, step)
-        elif episode<=self.EPISODES/3:
+        ##elif episode<=0 :
+        elif episode<=self.EPISODES/3 :
             reward=self.__explore(current_location)
         else:
-            reward=self.__arrive(current_location)+self.__flight_back(prev_action, current_action)
+            reward=1*self.__arrive(current_location)+self.__flight_back(prev_action, current_action)
         return reward
