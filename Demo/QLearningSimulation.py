@@ -1,6 +1,8 @@
 import math
 import numpy as np
 import sys
+import argparse
+from datetime import datetime
 from tqdm import tqdm
 from pathlib import Path
 from qvl.qlabs import QuanserInteractiveLabs
@@ -11,6 +13,7 @@ if dir not in sys.path:
 
 from Module.City import City
 from Module.QDrone2 import QDrone2
+from Module.VirtualQDrone2 import VirtualQDrone2
 from Module.QLearning import QLearning
 from Module.Reward import Reward
 from Module.Drawing import Draw
@@ -22,6 +25,10 @@ MAX_STEPS=100
 GOAL_TOLERANCE=0.3
 ORIGINE=[0.5, 0.5]
 GOAL=[SIZE-0.5, SIZE-0.5]
+VIRTUAL=False   # 由 __main__ 的 --virtual 覆盖；True 时用纯网格虚拟环境替代 QLabs
+
+SAVE_DIR=Path(__file__).parent.parent/"saved_models"   # Q表保存目录
+CHECKPOINT_EVERY=500                                    # 每多少回合存一次检查点
 
 MAZE=np.ones((SIZE+2,SIZE+2))
 for i in range(SIZE+2):
@@ -55,7 +62,14 @@ MAZE_POINTS=[
 def create_maze(point):
     MAZE[int(point[0]+0.5), int(point[1]+0.5)]=0
 
+def build_maze():
+    """把 MAZE_POINTS 转成 MAZE 网格（不依赖 QLabs，虚拟模式也用这一份）"""
+    for i in range(len(MAZE_POINTS)):
+        create_maze(MAZE_POINTS[i])
+
 def build_city(qlabs):
+
+    build_maze()
 
     city_construction=City(qlabs)
     city_construction.clean_city()
@@ -69,7 +83,6 @@ def build_city(qlabs):
     # 搭建迷宫
     for i in range(len(MAZE_POINTS)):
         city_construction.create_building(MAZE_POINTS[i], [0,0,0], [1,1,3], [0.3,0.3,0.3])
-        create_maze(MAZE_POINTS[i])
 
     # 构建起点和终点
     city_construction.create_building([0.5,0.5,0.05], [0,0,0], [1,1,0.1], [1,0,0])# 起点
@@ -77,7 +90,10 @@ def build_city(qlabs):
 
 def reset_environment(qlabs):
     """重置环境"""
-    qdrone2=QDrone2(qlabs)
+    if VIRTUAL:
+        qdrone2=VirtualQDrone2(MAZE_POINTS, SIZE)
+    else:
+        qdrone2=QDrone2(qlabs)
     qdrone2.destroy_all_qdrone2()
     create_success=qdrone2.create_qdrone2([0.5,0.5,0.35], [0,0,0], [0.25,0.25,0.25])
     if create_success:
@@ -97,15 +113,20 @@ def execute_action(qdrone2, location, action):
         action: 所选动作
         action_space_type: 动作类型
     """
-    setpoint=[]
     action_mapping={
         0: [1, 0, 0],
         1: [-1, 0, 0],
         2: [0, 1, 0],
         3: [0, -1, 0],
     }
-    for i in range(3):
-        setpoint.append(location[i]+action_mapping.get(action, [0, 0, 0])[i])
+    delta=action_mapping.get(action, [0, 0, 0])
+    # 目标点以"当前所在格的格心"为基准，而不是当前位置：
+    # 用 location + 1 会让每步 0~0.05 m 的落点误差逐步累积（实测 52 步可到 0.35 m），
+    # 无人机贴着墙飞就会蹭墙。以格心为基准则每步都回中，误差不累积。
+    # 取整方式与 QLearning.discretize_state() 的 int() 保持一致。
+    cx=int(location[0])+0.5
+    cy=int(location[1])+0.5
+    setpoint=[cx+delta[0], cy+delta[1], location[2]]
     
     fly_success, location, collision=qdrone2.fly_to(setpoint)
     return fly_success, location, collision, setpoint
@@ -128,6 +149,13 @@ def if_done(location, step, collision):
         return True, True, True
     
     return False, False, False
+
+def save_q_table(q_table, path):
+    """保存Q表到 .npy（目录不存在会自动创建）"""
+    path=Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, q_table)
+    return path
 
 def qlearning_train(qlabs,drawer):
     """使用Q-learning算法训练无人机"""
@@ -185,6 +213,11 @@ def qlearning_train(qlabs,drawer):
         if finish and not_collision:
             success_count+=1
         
+        # 定期保存Q表检查点
+        if (episode+1)%CHECKPOINT_EVERY==0:
+            p=save_q_table(agent.q_table, SAVE_DIR/f"qtable_ep{episode+1:04d}.npy")
+            print(f"检查点已保存: {p.name}")
+
         # 每100回合输出一次统计信息
         if (episode+1)%100==0:
             avg_reward=np.mean(total_rewards[-100:])
@@ -194,6 +227,12 @@ def qlearning_train(qlabs,drawer):
             success_count = 0
     
     print("Q-learning训练完成!")
+
+    # 最终结果带时间戳单独保存（不同批次/不同随机种子不会互相覆盖）
+    stamp=datetime.now().strftime("%Y%m%d_%H%M%S")
+    final_path=save_q_table(agent.q_table, SAVE_DIR/f"qtable_final_{stamp}.npy")
+    print(f"最终Q表已保存: {final_path}")
+
     drawer.draw(total_episode, total_rewards, "Reward Line Graph", "Episodes", "Rewards", show_MAZE=False, trajectory=False)
     return agent
 
@@ -250,13 +289,26 @@ def qlearning_test(qlabs, agent, evaluator):
     return x, y, win
 
 if __name__=="__main__":
-    # 连接QLabs
-    qlabs=QuanserInteractiveLabs()
-    if not qlabs.open("localhost"):
-        print("无法连接QLabs")
+    # 命令行开关：默认走真机流程，加 --virtual 改用纯网格虚拟环境
+    parser=argparse.ArgumentParser(description='QDrone2 走迷宫 - Q-Learning Demo')
+    parser.add_argument('--virtual', action='store_true',
+                        help='用纯网格虚拟环境训练（秒级完成），不连接 QLabs')
+    args=parser.parse_args()
+    VIRTUAL=args.virtual
+
+    if VIRTUAL:
+        # 虚拟模式：只填充 MAZE，不连接 QLabs、不搭建城市
+        build_maze()
+        qlabs=None
+        print("虚拟模式：训练在纯网格环境进行，不连接 QLabs")
+    else:
+        # 连接QLabs
+        qlabs=QuanserInteractiveLabs()
+        if not qlabs.open("localhost"):
+            print("无法连接QLabs")
     
-    # 构建环境
-    build_city(qlabs)
+        # 构建环境
+        build_city(qlabs)
     
     evaluator = Evaluator()
     

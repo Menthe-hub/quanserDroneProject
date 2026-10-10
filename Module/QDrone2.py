@@ -59,7 +59,7 @@ class QDrone2:
         success, prev_location, _, _, _=self.get_location()
         if not success:
             return False
-        z_pid=PIDController(2,0.8,0.1,setpoint[2])
+        z_pid=PIDController(6,0.8,0.5,setpoint[2])
         while True:
             vz=z_pid.update(prev_location[2])
             _, location, _, _, _, _, collision, _, _=self.qdrone2.set_velocity_and_request_state(
@@ -102,9 +102,12 @@ class QDrone2:
         success, prev_location, _, _, collision=self.get_location()
         if not success:
             return success, prev_location, collision
-        x_pid=PIDController(2,0.8,0.1,setpoint[0])
-        y_pid=PIDController(2,0.8,0.1,setpoint[1])
-        z_pid=PIDController(2,0.8,0.1,setpoint[2])
+        # 增益由 (2,0.8,0.1) 提到 (6,0.8,0.5)：1m 移动 0.67s -> 0.41s（实测 0.35~0.41）
+        # 注意：这个增益只有在 execute_action 以格心为目标（误差不累积）时才是安全的，
+        # 用"当前位置+1"的旧写法会贴墙蹭墙。
+        x_pid=PIDController(6,0.8,0.5,setpoint[0])
+        y_pid=PIDController(6,0.8,0.5,setpoint[1])
+        z_pid=PIDController(6,0.8,0.5,setpoint[2])
         while True:
             vx=x_pid.update(prev_location[0])
             vy=y_pid.update(prev_location[1])
