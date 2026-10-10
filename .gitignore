@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 虚拟环境
+.venv/
+venv/
+
+# Office 临时锁文件（Word 打开 docx 时生成）
+~$*
+
+# 编辑器 / 日志
+.idea/
+*.log
