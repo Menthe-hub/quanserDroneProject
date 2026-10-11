@@ -25,6 +25,11 @@
 
 import numpy as np
 
+# 把 QLabs 的访问串行化（幂等）。只在真正连 QLabs 时才起作用，虚拟模式无影响。
+# 不加的话：用了行人线程（dynamic 模式）后，主线程的请求会被线程抢走应答，
+# 表现为无人机误报碰撞 / spawn 静默失败。详见 Module/QLabsLock.py。
+from Module import QLabsLock  # noqa: F401
+
 SIZE = 19
 ORIGINE = [0.5, 0.5]
 GOAL = [SIZE - 0.5, SIZE - 0.5]

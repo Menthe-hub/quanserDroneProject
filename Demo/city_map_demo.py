@@ -17,6 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# 必须在任何 qvl 使用之前导入：把 QLabs 的访问串行化。
+# 不导的话，行人线程与主线程会互相吃掉对方的回包（实测：无人机在第 2 步就误报碰撞）。
+import Module.QLabsLock  # noqa: F401
+
 from Module import MapSpec
 
 
@@ -55,7 +59,7 @@ def cmd_build(qlabs, pedestrians, seconds):
         print("已停止所有行人线程，正常退出")
 
 
-def cmd_run(qlabs, virtual, episodes):
+def cmd_run(qlabs, virtual, episodes, pedestrians):
     """用新地图跑一遍训练 + 测试"""
     import numpy as np
     import Demo.QLearningSimulation as S
@@ -78,7 +82,7 @@ def cmd_run(qlabs, virtual, episodes):
     else:
         S.VIRTUAL = False
         print("真机模式：建图中...")
-        city = MapSpec.build_scene(qlabs, pedestrians="off")
+        city = MapSpec.build_scene(qlabs, pedestrians=pedestrians)
 
     drawer = S.Draw(S.SIZE, S.MAZE)
     agent = S.qlearning_train(qlabs, drawer)
@@ -116,6 +120,6 @@ if __name__ == "__main__":
     if a.build:
         cmd_build(qlabs, a.pedestrians, a.seconds)
     elif a.run:
-        cmd_run(qlabs, a.virtual, a.episodes)
+        cmd_run(qlabs, a.virtual, a.episodes, a.pedestrians)
     else:
         ap.print_help()
