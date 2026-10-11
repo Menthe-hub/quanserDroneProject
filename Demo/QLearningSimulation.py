@@ -160,7 +160,7 @@ def save_q_table(q_table, path):
 def load_q_table(path, action_size=4):
     """从 .npy 载入已训练好的Q表，构造一个可直接测试的 agent（跳过训练）"""
     path=Path(path)
-    if not path.exists():
+    if not path.is_file():      # 用 is_file 而非 exists：路径是目录（含空字符串）时也要报错
         raise FileNotFoundError(f"找不到Q表文件: {path}")
     q_table=np.load(path)
     if q_table.shape != (SIZE, SIZE, action_size):
@@ -311,7 +311,7 @@ if __name__=="__main__":
     args=parser.parse_args()
     VIRTUAL=args.virtual
 
-    if args.load and VIRTUAL:
+    if args.load is not None and VIRTUAL:
         print("注意：--load 与 --virtual 同时使用，测试也会在虚拟环境里跑，")
         print("      误差分布图会全是 0，不能用于正式结果。")
 
@@ -333,7 +333,7 @@ if __name__=="__main__":
     
     # 开始训练（带 --load 时跳过训练，直接载入已训练好的Q表）
     drawer=Draw(SIZE, MAZE)
-    if args.load:
+    if args.load is not None:   # 注意用 is not None：空字符串也要走进 load，否则会静默地从头训练
         agent=load_q_table(args.load)
         print(f"已载入Q表 {args.load}，跳过训练")
     else:
