@@ -12,3 +12,7 @@ venv/
 # 编辑器 / 日志
 .idea/
 *.log
+
+# 保存的模型
+.saved_models/
+*.npy

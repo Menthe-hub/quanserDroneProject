@@ -4,11 +4,9 @@ import numpy as np
 class VirtualQDrone2:
     """纯网格虚拟无人机：对外接口与 Module/QDrone2.py 的 QDrone2 完全一致，但不连接 QLabs。
 
-    用途：QLearningSimulation.py 加 --virtual 后用它替代 QDrone2，把每一次"真实飞行"
-    换成长度为零的网格判定，训练耗时从小时级降到秒级。
+    用途：QLearningSimulation.py 加 --virtual 后用它替代 QDrone2
 
-    墙体由 MAZE_POINTS 按与 build_city() 完全相同的方式生成，所以虚拟环境里的墙
-    和 QLabs 里真实搭出来的墙必然一致。
+    墙体由 MAZE_POINTS 按与 build_city() 完全相同的方式生成
     """
 
     def __init__(self, maze_points, size):

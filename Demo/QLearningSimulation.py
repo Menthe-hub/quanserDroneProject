@@ -305,15 +305,15 @@ if __name__=="__main__":
     # 命令行开关：默认走真机流程，加 --virtual 改用纯网格虚拟环境
     parser=argparse.ArgumentParser(description='QDrone2 走迷宫 - Q-Learning Demo')
     parser.add_argument('--virtual', action='store_true',
-                        help='用纯网格虚拟环境训练（秒级完成），不连接 QLabs')
+                        help='用纯网格虚拟环境训练，不连接 QLabs')
     parser.add_argument('--load', type=str, default=None, metavar='QTABLE.npy',
-                        help='载入已训练好的Q表并跳过训练（配合真机可只跑测试出图）')
+                        help='载入已训练好的Q表并跳过训练')
     args=parser.parse_args()
     VIRTUAL=args.virtual
 
     if args.load is not None and VIRTUAL:
         print("注意：--load 与 --virtual 同时使用，测试也会在虚拟环境里跑，")
-        print("      误差分布图会全是 0，不能用于正式结果。")
+        print("      误差分布图会全是 0, 不能用于正式结果。")
 
     if VIRTUAL:
         # 虚拟模式：只填充 MAZE，不连接 QLabs、不搭建城市
@@ -333,7 +333,7 @@ if __name__=="__main__":
     
     # 开始训练（带 --load 时跳过训练，直接载入已训练好的Q表）
     drawer=Draw(SIZE, MAZE)
-    if args.load is not None:   # 注意用 is not None：空字符串也要走进 load，否则会静默地从头训练
+    if args.load is not None:  
         agent=load_q_table(args.load)
         print(f"已载入Q表 {args.load}，跳过训练")
     else:
