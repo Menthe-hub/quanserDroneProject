@@ -150,7 +150,18 @@ class City:
             traceback.print_exc()
     
     def periodic_thread(self, character, location, waypoints, speed):
-        """启动折线往复运动线程
+        """启动折线往复运动线程，返回线程对象
+
+        ⚠ **QLabs 的 Python 客户端不是线程安全的。** 线程一旦跑起来，主线程就不能
+        再用同一个 qlabs 做任何操作（建图、读状态都不行），否则**直接段错误**
+        （实测复现，见 probe/阶段0-结论.md）。正确用法：
+        **先把整个场景建完，最后才启动行人线程。**
+
+        与旧版的三点区别：
+          1. 线程是 daemon，主流程结束后进程能正常退出（旧版会让进程永远挂住）
+          2. 线程与停止事件登记在 self._movers 上，可用 stop_pedestrians() 回收
+          3. stop_pedestrians() 必须在销毁 actor 之前调用
+
         输入变量：
             character: 行人类
             location: 行人初始位置

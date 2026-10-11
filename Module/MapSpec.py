@@ -162,6 +162,26 @@ def reachable_from_start():
 # 场景构建
 # ---------------------------------------------------------------------------
 
+def preflight(qlabs):
+    """建图前先确认 QLabs 场景真的可用。
+
+    QLabs 的 spawn 失败时**不抛异常**，只返回非 0 状态码（-1 = 通讯错误）。
+    如果世界被卸载（例如客户端被强杀异常断开），后续所有 spawn 都会静默失败，
+    而调用方如果只看自己的打印，会误以为"建图成功"。这里显式挡掉这种情况。
+    """
+    from qvl.basic_shape import QLabsBasicShape
+    st = QLabsBasicShape(qlabs).spawn(location=[-60, -60, -60], rotation=[0, 0, 0], scale=[1, 1, 1])
+    if isinstance(st, tuple):
+        st = st[0]
+    if st != 0:
+        raise RuntimeError(
+            f"QLabs 场景不可用（spawn 返回 {st}；-1 表示通讯错误）。\n"
+            "  最常见原因：QLabs 卸载了世界。请在 QLabs 里重新打开 QDrone2 / Plane 空世界。\n"
+            "  另一个坑：不要用外部 timeout 强杀连着 QLabs 的 Python 进程 —— 客户端异常\n"
+            "  断开会让 QLabs 退回世界选择界面。让它优雅退出（例如用 --seconds）。"
+        )
+
+
 def build_scene(qlabs, city=None, pedestrians="off", verbose=True):
     """把地图搭进 QLabs。返回 City 实例（用于之后 stop_pedestrians）。
 
@@ -175,6 +195,7 @@ def build_scene(qlabs, city=None, pedestrians="off", verbose=True):
     from qvl.person import QLabsPerson
     import time
 
+    preflight(qlabs)                 # 场景不可用就立刻报错，别静默"建完图"
     city = city or City(qlabs)
     city.clean_all()
 
@@ -201,10 +222,18 @@ def build_scene(qlabs, city=None, pedestrians="off", verbose=True):
 
     # 5) 行人
     if pedestrians == "dynamic":
+        # 必须"先把所有行人建完，再统一启动线程"。
+        # 原因：QLabs 的 Python 客户端**不是线程安全的** —— 行人线程在用 socket 调
+        # move_to 的同时，主线程若还在用同一个 socket 建图，会直接段错误（实测，
+        # 见 probe/阶段0-结论.md）。所以两段必须严格分开。
+        movers = []
         for route in PEDESTRIAN_ROUTES:
             wp = [[p[0], p[1], 0.0] for p in route]
             person = city.create_character(wp[0], [0, 0, 0], [1, 1, 1])
+            movers.append((person, wp))
             time.sleep(0.3)
+        time.sleep(0.5)                      # 让最后一帧建图指令确认完成
+        for person, wp in movers:
             city.periodic_thread(person, wp[0], wp, QLabsPerson.WALK)
         if verbose:
             print(f"  行人：dynamic（{len(PEDESTRIAN_ROUTES)} 条巡逻线，会挡路）")
