@@ -29,7 +29,8 @@ def cmd_check():
     steps = MapSpec.report()
     print()
     print("  提示：最短路径 = 曼哈顿下界说明地图很开放（对 A* 是平凡解、对 RL 较容易）。")
-    print("        想加难度就编辑 Module/MapSpec.py 里的 BASE_ASCII，再跑一次 --check。")
+    print("        想加难度就改 Module/MapSpec.py 的 BLOCK_FILL（楼更密）或 CITY_SEED"
+          "（换一座城），再跑一次 --check。")
 
 
 def cmd_build(qlabs, pedestrians, seconds):
@@ -41,8 +42,11 @@ def cmd_build(qlabs, pedestrians, seconds):
     city = MapSpec.build_scene(qlabs, pedestrians=pedestrians)
     print(f"建图完成，用时 {time.time()-t0:.1f}s")
 
+    # 机位**由 SIZE 派生** —— 地图放大后写死的坐标只能拍到一个角
+    mid = MapSpec.SIZE / 2
     cam = QLabsFreeCamera(qlabs)
-    cam.spawn_id(actorNumber=0, location=[9.5, -12.0, 20.0], rotation=[0, math.radians(60), 0])
+    cam.spawn_id(actorNumber=0, location=[mid, mid, MapSpec.SIZE * 1.55],
+                 rotation=[0, math.pi / 2, 0])
     cam.possess()
     try:
         if seconds:

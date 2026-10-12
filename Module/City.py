@@ -218,6 +218,15 @@ class City:
         thread.start()
         return thread
 
+    def register_mover(self, thread, stop_event):
+        """登记一个外部创建的 mover 线程，让 stop_pedestrians() 能回收它。
+
+        给 MapSpec.PedestrianFleet 用 —— 它自己管线程（因为要"走完一趟就换人"），
+        但停止/回收必须和 City 内建的 *_thread 走同一套，否则销毁 actor 时
+        还有线程在调 move_to，会崩。
+        """
+        self._movers.append((thread, stop_event))
+
     def stop_pedestrians(self, timeout=5.0):
         """停止并回收所有由 *_thread 启动的行人运动线程
 
