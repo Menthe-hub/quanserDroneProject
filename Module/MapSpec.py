@@ -23,6 +23,8 @@
 * 建图 **66.7 ms/块**，一张 19×19 约 16 秒 → **只能建一次**，绝不能放进 reset_environment
 """
 
+import random
+
 import numpy as np
 
 # 把 QLabs 的访问串行化（幂等）。只在真正连 QLabs 时才起作用，虚拟模式无影响。
@@ -64,6 +66,34 @@ BASE_ASCII = [
 assert len(BASE_ASCII) == SIZE, f"ASCII 行数应为 {SIZE}"
 for _r, _row in enumerate(BASE_ASCII):
     assert len(_row) == SIZE, f"第 {_r} 行长度 {len(_row)}，应为 {SIZE}"
+
+# ---- 外观与合法性常量 ----
+
+VALID_CHARS = {".", "#", "T"}          # 学生能用的字符集
+
+# 楼的外墙配色。刻意选接近的灰调，让城市有层次而不是花哨。
+BUILDING_PALETTE = [
+    [0.30, 0.30, 0.30],
+    [0.35, 0.32, 0.30],
+    [0.28, 0.30, 0.34],
+    [0.33, 0.31, 0.28],
+    [0.30, 0.33, 0.33],
+    [0.36, 0.34, 0.32],
+]
+DELIVERY_COLOR = [1.0, 0.55, 0.0]      # 投递点地砖：橙色（场景里没有文字标签，只能靠颜色）
+
+
+def building_style(i, j):
+    """按格子坐标**确定性**地给出这栋楼的高度与颜色。
+
+    规则式而非逐格数据 —— 学生改完 ASCII 后自动跟随，不用手工维护。
+    占地仍然是 1x1 格，所以**碰撞行为逐格不变**，只是整座城市不再是一排
+    一模一样的灰方块。
+    """
+    h = 2.0 + ((i * 7 + j * 13) % 4)                       # 2.0 / 3.0 / 4.0 / 5.0
+    color = BUILDING_PALETTE[(i * 5 + j * 11) % len(BUILDING_PALETTE)]
+    return h, color
+
 
 # 街区行/列的判定：每 3 格一条街
 def is_street(i, j):
@@ -163,6 +193,120 @@ def reachable_from_start():
     return seen
 
 
+def load_ascii(ascii_list, verbose=True):
+    """校验并装载一份 ASCII 地图（覆盖模块级的 BASE_ASCII）。
+
+    现有所有函数（wall_cells / occupancy / shortest_path / build_scene …）
+    都经由 _cell_char 读 BASE_ASCII，所以装载后**自动全部跟随**。
+
+    校验不过会抛 ValueError 并说明原因 —— 学生改坏了能立刻看到问题。
+    """
+    global BASE_ASCII
+    if len(ascii_list) != SIZE:
+        raise ValueError(f"地图应有 {SIZE} 行，实际 {len(ascii_list)} 行")
+    for j, row in enumerate(ascii_list):
+        if len(row) != SIZE:
+            raise ValueError(f"第 {j} 行应有 {SIZE} 个字符，实际 {len(row)} 个")
+        bad = set(row) - VALID_CHARS
+        if bad:
+            raise ValueError(f"第 {j} 行含非法字符 {sorted(bad)}，只允许 {sorted(VALID_CHARS)}")
+    BASE_ASCII = list(ascii_list)
+    if verbose:
+        print(f"已装载地图：{SIZE}x{SIZE}，障碍 {len(wall_cells())} 格")
+    return BASE_ASCII
+
+
+def components():
+    """所有可通行区域的连通分量，按大小从大到小返回 [set_of_cells, ...]"""
+    remaining = set(free_cells())
+    comps = []
+    while remaining:
+        seed = next(iter(remaining))
+        remaining.discard(seed)
+        comp, stack = set(), [seed]
+        while stack:
+            i, j = stack.pop()
+            comp.add((i, j))
+            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nb = (i + di, j + dj)
+                if nb in remaining:
+                    remaining.discard(nb)
+                    stack.append(nb)
+        comps.append(comp)
+    return sorted(comps, key=len, reverse=True)
+
+
+def mission_report(deliveries, start=(0, 0), goal=None, verbose=True):
+    """体检 + 堵路测试（纯离线，不需要 QLabs）。返回 True/False（是否通过验收）。
+
+    输入变量：
+        deliveries: 有序投递点格子列表
+        start: 起点格子
+        goal: 终点格子；默认 (SIZE-1, SIZE-1)
+    """
+    from Module import Astar                 # 惰性导入，避免循环依赖
+
+    start = tuple(start)
+    goal = (SIZE - 1, SIZE - 1) if goal is None else tuple(goal)
+    ok = True
+
+    def say(*a):
+        if verbose:
+            print(*a)
+
+    say("=" * 62)
+    say("城市体检")
+    say("=" * 62)
+
+    wc = wall_cells()
+    trees = sum(1 for c in wc if cell_style(*c) == "tree")
+    say(f"  尺寸        {SIZE} x {SIZE}")
+    say(f"  障碍        {len(wc)} 格（楼 {len(wc)-trees}，树 {trees}）")
+    say(f"  可通行      {len(free_cells())} 格")
+
+    comps = components()
+    say(f"  连通分量    {len(comps)} 个（最大 {len(comps[0])} 格）")
+    if len(comps) > 1:
+        say(f"    ⚠ 有 {len(comps)-1} 个与主区域**不通**的孤立区，例如 "
+            f"{[sorted(c)[0] for c in comps[1:5]]} …")
+        ok = False
+
+    de = dead_ends()
+    say(f"  死胡同      {len(de)} 个" + (f"  {de[:8]}{' …' if len(de) > 8 else ''}" if de else ""))
+
+    steps = shortest_path()[0]
+    say(f"  起点->终点  {'✗ 不可达' if steps is None else str(steps) + ' 步'}")
+
+    say("")
+    say("=" * 62)
+    say("堵路测试（固定任务必须仍然可完成）")
+    say("=" * 62)
+    say("  任务：" + " -> ".join(str(p) for p in (start, *deliveries, goal)))
+
+    free = set(free_cells())
+    for name, pt in [("起点", start), ("终点", goal)] + \
+                    [(f"投递点{k+1}", tuple(d)) for k, d in enumerate(deliveries)]:
+        if pt not in free:
+            say(f"  ✗ {name} {pt} 落在墙上或越界")
+            ok = False
+
+    cells, legs = Astar.plan_route(start, deliveries, goal=goal)
+    for k, L in enumerate(legs, 1):
+        if L["ok"]:
+            say(f"    第{k}段 {L['from']} -> {L['to']}: {L['steps']:>3} 步  ✓")
+        else:
+            say(f"    第{k}段 {L['from']} -> {L['to']}:  ✗ 被堵死")
+    if cells is None:
+        say("  ✗ 任务不可解 —— 路线被堵死了")
+        ok = False
+    else:
+        say(f"  任务总长 {len(cells)-1} 步  ✓ 可解")
+
+    say("")
+    say(f"  ==> 验收 {'✓ 通过' if ok else '✗ 不通过'}")
+    return ok, (cells, legs)
+
+
 # ---------------------------------------------------------------------------
 # 场景构建
 # ---------------------------------------------------------------------------
@@ -187,7 +331,7 @@ def preflight(qlabs):
         )
 
 
-def build_scene(qlabs, city=None, pedestrians="off", verbose=True):
+def build_scene(qlabs, city=None, pedestrians="off", verbose=True, decor=None, deliveries=None):
     """把地图搭进 QLabs。返回 City 实例（用于之后 stop_pedestrians）。
 
     输入变量：
@@ -195,6 +339,8 @@ def build_scene(qlabs, city=None, pedestrians="off", verbose=True):
         city: (可选) 复用一个已有的 City 实例
         pedestrians: 'off' 或 'dynamic'。探针实测行人**永远挡路**，
                      所以没有"不挡路的景观行人"这一档（见模块 docstring）。
+        decor: (可选) 装饰列表（见 apply_decor 的 schema）。不给就用默认的 decorate()。
+        deliveries: (可选) 有序投递点格子列表，会在对应格子放标记。
     """
     from Module.City import City
     from qvl.person import QLabsPerson
@@ -204,26 +350,47 @@ def build_scene(qlabs, city=None, pedestrians="off", verbose=True):
     city = city or City(qlabs)
     city.clean_all()
 
-    # 1) 边界（与现有 Demo 的 build_city 完全相同的做法）
-    city.create_building([-0.5, SIZE / 2, 10.5], [0, 0, 0], [1, SIZE + 2, 21], [0.1, 0.1, 0.1], roughness=0.01)
-    city.create_building([SIZE / 2, -0.5, 10.5], [0, 0, 0], [SIZE, 1, 21], [0.1, 0.1, 0.1], roughness=0.01)
-    city.create_building([SIZE + 0.5, SIZE / 2, 10.5], [0, 0, 0], [1, SIZE + 2, 21], [0.1, 0.1, 0.1], roughness=0.01)
-    city.create_building([SIZE / 2, SIZE + 0.5, 10.5], [0, 0, 0], [SIZE, 1, 21], [0.1, 0.1, 0.1], roughness=0.01)
+    # 1) 边界墙。高度特意压到 1.5 m —— 实测 1.0 m 就足以在 z=1.0 挡住无人机，
+    #    留 0.5 m 余量；墙不高，场外的"郊区环"才看得见（21 m 会把场外全遮住）。
+    BH = 1.5
+    city.create_building([-0.5, SIZE / 2, BH / 2], [0, 0, 0], [1, SIZE + 2, BH], [0.1, 0.1, 0.1], roughness=0.01)
+    city.create_building([SIZE / 2, -0.5, BH / 2], [0, 0, 0], [SIZE, 1, BH], [0.1, 0.1, 0.1], roughness=0.01)
+    city.create_building([SIZE + 0.5, SIZE / 2, BH / 2], [0, 0, 0], [1, SIZE + 2, BH], [0.1, 0.1, 0.1], roughness=0.01)
+    city.create_building([SIZE / 2, SIZE + 0.5, BH / 2], [0, 0, 0], [SIZE, 1, BH], [0.1, 0.1, 0.1], roughness=0.01)
 
-    # 2) 障碍格：楼 或 树（碰撞行为相同，外观不同）
+    # 2) 障碍格：楼 或 树。楼的高度与颜色按 (i,j) 确定性变化 ——
+    #    占地仍是 1x1 格，**碰撞行为逐格不变**，但整座城市不再是一排一样的灰方块。
     for (i, j) in wall_cells():
         x, y = i + 0.5, j + 0.5
         if cell_style(i, j) == "tree":
             city.create_tree([x, y, 0.0], scale=1.0)
         else:
-            city.create_building([x, y, 1.5], [0, 0, 0], [1, 1, 3], [0.3, 0.3, 0.3])
+            h, color = building_style(i, j)
+            city.create_building([x, y, h / 2], [0, 0, 0], [1, 1, h], color)
 
     # 3) 起点 / 终点
     city.create_building([0.5, 0.5, 0.05], [0, 0, 0], [1, 1, 0.1], [1, 0, 0])
     city.create_building([SIZE - 0.5, SIZE - 0.5, 0.05], [0, 0, 0], [1, 1, 0.1], [0, 0, 1])
 
-    # 4) 装饰层（只生成 actor，不影响 occupancy）
-    decorate(qlabs, city)
+    # 4) 投递点标记：橙色矮地砖 + 参考坐标系。
+    #    场景里**没有任何文字标签**，只能靠颜色 + 标记来区分（见模块 docstring）。
+    if deliveries:
+        for (i, j) in deliveries:
+            city.create_building([i + 0.5, j + 0.5, 0.04], [0, 0, 0], [1, 1, 0.08], DELIVERY_COLOR)
+            city.create_reference_frame([i + 0.5, j + 0.5, 1.2])
+
+    # 5) 装饰层（只生成 actor，不影响 occupancy）
+    if decor is None:
+        decorate(qlabs, city)
+    else:
+        n_dec = apply_decor(city, decor)
+        if verbose:
+            print(f"  装饰：来自 DECOR 列表（{n_dec} 项）")
+
+    # 6) 场外郊区环 —— 全部落在边界之外，结构上不可能影响可解性
+    n_out = outskirts(city)
+    if verbose:
+        print(f"  郊区：边界外 {n_out} 个组件")
 
     # 5) 行人
     if pedestrians == "dynamic":
@@ -272,6 +439,95 @@ def decorate(qlabs, city):
     # 起终点各放一个参考坐标系（场景里没有文字标签，用它当标记）
     city.create_reference_frame([0.5, 0.5, 1.2])
     city.create_reference_frame([SIZE - 0.5, SIZE - 0.5, 1.2])
+
+
+# ---- 装饰 schema：刻意只允许"矮件 / 不挡路"的组件 ----
+# 楼和树**不在其中** —— 要加就改 ASCII。
+# 这样"装饰永不把障碍物摆到走廊上"是**结构上成立**的，不靠约定。
+DECOR_DISPATCH = {
+    "road":      lambda c, d: c.create_road(d["points"], d.get("width", 0.6),
+                                            d.get("color", [0.15, 0.15, 0.15]), d.get("z", 0.02)),
+    "lane_line": lambda c, d: c.create_lane_line(d["center"], d["radius"],
+                                                 d.get("line_width", 0.08),
+                                                 d.get("color", [1.0, 0.85, 0.0]), d.get("z", 0.03)),
+    "crosswalk": lambda c, d: c.create_crosswalk(d["location"], d.get("rotation", [0, 0, 0]),
+                                                 d.get("scale", [1, 1, 1]), d.get("configuration", 0)),
+    "frame":     lambda c, d: c.create_reference_frame(d["location"], d.get("rotation", [0, 0, 0]),
+                                                       d.get("scale", [1, 1, 1])),
+    "cone":      lambda c, d: c.create_cone(d["location"], d.get("rotation", [0, 0, 0]),
+                                            d.get("scale", [1, 1, 1])),
+    "stop_sign": lambda c, d: c.create_stop_sign(d["location"], d.get("rotation", [0, 0, 0]),
+                                                 d.get("scale", [1, 1, 1])),
+    "wall":      lambda c, d: c.create_wall_block(d["location"], d.get("rotation", [0, 0, 0]),
+                                                  d.get("scale", [1, 1, 3])),
+}
+
+
+def apply_decor(city, decor):
+    """按 DECOR 列表生成装饰，返回成功生成的项数。
+
+    schema 见 DECOR_DISPATCH。不认识的 kind 会被跳过并提示，不会中断整张地图的构建。
+    """
+    n = 0
+    for k, d in enumerate(decor):
+        kind = d.get("kind")
+        fn = DECOR_DISPATCH.get(kind)
+        if fn is None:
+            print(f"  装饰第 {k} 项的 kind={kind!r} 不认识，已跳过"
+                  f"（可用：{sorted(DECOR_DISPATCH)}）")
+            continue
+        fn(city, d)
+        n += 1
+    return n
+
+
+def outskirts(city, seed=20261012, budget=70):
+    """场外郊区环 —— **全部落在 19x19 可飞区域之外**。
+
+    因为这些格子根本不在可飞区域里，**结构上不可能影响 occupancy()、
+    可解性或堵路测试**。高度随便加，都碰不到无人机。
+
+    用固定种子的 random.Random，保证每次建图完全可复现（场景只建一次，
+    建出来的样子必须稳定）。
+
+    输入变量：
+        seed: 随机种子
+        budget: 最多放几个组件（每个约 66.7 ms，70 个约 4.7 秒）
+    """
+    rng = random.Random(seed)
+    M = 4                                          # 郊区带宽（格）
+    lo, hi = -M, SIZE + M
+
+    # 一圈环路（SplineLine，矮，不挡路）
+    city.create_road([[lo + 0.5, lo + 0.5], [hi + 0.5, lo + 0.5],
+                      [hi + 0.5, hi + 0.5], [lo + 0.5, hi + 0.5],
+                      [lo + 0.5, lo + 0.5]], width=2.0)
+
+    # 郊区带里的候选位置（步长 2，避免太密）
+    cand = []
+    for i in range(lo, hi + 1, 2):
+        for j in range(lo, hi + 1, 2):
+            if i < 0 or i >= SIZE or j < 0 or j >= SIZE:   # 只要边界之外的
+                cand.append((i, j))
+    rng.shuffle(cand)
+
+    n = 0
+    for (i, j) in cand[:budget]:
+        x, y = i + 0.5, j + 0.5
+        if rng.random() < 0.30:
+            city.create_tree([x, y, 0.0], scale=rng.uniform(0.9, 1.5))
+        else:
+            h = rng.choice([1.5, 2.0, 2.5, 3.0, 4.0])
+            color = BUILDING_PALETTE[(i * 3 + j * 7) % len(BUILDING_PALETTE)]
+            city.create_building([x, y, h / 2], [0, 0, 0], [1.6, 1.6, h], color)
+        n += 1
+
+    # 一个象限放几栋高楼，做出"市中心天际线"
+    for (i, j, h) in [(21, 21, 9.0), (23, 25, 12.0), (25, 21, 7.0), (22, 27, 10.0)]:
+        city.create_building([i + 0.5, j + 0.5, h / 2], [0, 0, 0], [2.2, 2.2, h],
+                             BUILDING_PALETTE[(i + j) % len(BUILDING_PALETTE)])
+        n += 1
+    return n
 
 
 # ---------------------------------------------------------------------------
